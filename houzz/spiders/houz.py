@@ -2,6 +2,7 @@
 import scrapy, json, urllib
 from scrapy.utils.response import open_in_browser
 from houzz.items import HouzzItem
+from bs4 import BeautifulSoup
 
 BaseURL = "https://www.houzz.com.au"
 GoogleURL = "https://script.google.com/macros/s/AKfycbya3T7dcbunoow22WfI0jtyJYvUIYa8fW0vgs8A3vP0YOFfUqvu/exec"
@@ -21,11 +22,12 @@ class HouzSpider(scrapy.Spider):
             CategoryHref = Category.xpath("normalize-space(./@href)")[0].extract()
             MetaData = {
                 "Category Title"    :   CategoryTitle,
-                "Category Href"     :   CategoryHref
+                "Category Href"     :   CategoryHref,
+                "dont_cache"        :   True
             }
             if "http" in CategoryHref:
                 yield scrapy.Request(CategoryHref, callback=self.parse_categories, dont_filter=True, meta=MetaData)
-                #break
+                # break
     
     def parse_categories(self, response):
         for Post in response.xpath("//div[contains(@class,'browseListBody ')]/div[contains(@class,'whiteCard ')]"):
@@ -33,14 +35,16 @@ class HouzSpider(scrapy.Spider):
             PostHref = Post.xpath(".//div[@class='name-info']/a/@href")[0].extract()
             MetaData = {
                 "category"  :   response.meta['Category Title'],
-                "posttitle" :   urllib.quote(PostTitle.encode('utf-8')),
-                "posthref"  :   PostHref,
+                # "posttitle" :   urllib.quote(PostTitle.encode('utf-8')),
+                "posttitle" :   PostTitle.encode('utf-8'),
+                "posthref"  :   PostHref
             }
             if "http" in PostHref:
                 yield scrapy.Request(PostHref, meta=MetaData, callback=self.parse_details, dont_filter=True)
         try:
             NextPageLink = response.xpath("//li/a[@class='navigation-button next']/@href")[0].extract()
             if "http" in NextPageLink:
+                response.meta['dont_cache'] =   True
                 yield scrapy.Request(NextPageLink, callback=self.parse_categories, dont_filter=True, meta=response.meta)
         except:
             pass
@@ -60,29 +64,15 @@ class HouzSpider(scrapy.Spider):
                 ContactPerson = "-"
             try:
                 LocationRAW = response.xpath("//div[@class='info-list-text']/b[text()='Location']/..")
-                try:
-                    Street = LocationRAW.xpath("./span[@itemprop='streetAddress']/text()")[0].extract()
-                except:
-                    Street = "-"
-                try:
-                    AddressLocality = LocationRAW.xpath("./span[@itemprop='addressLocality']/text()")[0].extract()
-                except:
-                    AddressLocality = "-"
-                try:
-                    AddressRegion = LocationRAW.xpath("./span[@itemprop='addressRegion']/text()")[0].extract()
-                except:
-                    AddressRegion = "-"
-                try:
-                    PostalCode = LocationRAW.xpath("./span[@itemprop='postalCode']/text()")[0].extract()
-                except:
-                    PostalCode = "-"
-                try:
-                    AddressCountry = LocationRAW.xpath("./span[@itemprop='addressCountry']/text()")[0].extract()
-                except:
-                    AddressCountry = "-"
+                Street = LocationRAW.xpath("./span[@itemprop='streetAddress']/text()")[0].extract()
+                AddressLocality = LocationRAW.xpath("./span[@itemprop='addressLocality']/text()")[0].extract()
+                AddressRegion = LocationRAW.xpath("./span[@itemprop='addressRegion']/text()")[0].extract()
+                PostalCode = LocationRAW.xpath("./span[@itemprop='postalCode']/text()")[0].extract()
+                AddressCountry = LocationRAW.xpath("./span[@itemprop='addressCountry']/text()")[0].extract()
                 Location = Street + ", " + AddressLocality + ", " + AddressRegion + ", " + PostalCode + ", " + AddressCountry
             except:
-                Location = "-"
+                Location = BeautifulSoup(response.xpath("//div[@class='info-list-text']/b[text()='Location']/..")[0].extract(), 'lxml').get_text()
+                Location = Location.replace("Location: ", "")
             items["category"] = response.meta['category'],
             items["posttitle"] = response.meta['posttitle'],
             items["posthref"] = response.meta['posthref'],
@@ -90,9 +80,10 @@ class HouzSpider(scrapy.Spider):
             items["contact"] = ContactPerson,
             items["phone"] = PhoneNumber
             yield items
-            print "Item processed!"
+            self.logger.info("Item processed!")
             #yield scrapy.FormRequest(GoogleURL, formdata=DataObject, callback=self.dummy, method="POST", dont_filter=True, meta={"refresh_cache":True})
         else:
+            # self.logger.info("Page is cached!")
             pass
     
     def dummy(self, response):
